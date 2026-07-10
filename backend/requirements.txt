@@ -1,0 +1,14 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+SQLAlchemy==2.0.36
+aiosqlite==0.20.0
+aiomysql==0.2.0
+PyMySQL==1.1.1
+python-jose[cryptography]==3.3.0
+python-dotenv==1.0.1
+httpx==0.28.1
+pydantic==2.10.4
+python-multipart==0.0.20
+qiniu>=7.17.0
+mediapipe>=0.10.14
+scipy>=1.11.0
