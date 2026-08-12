@@ -1,5 +1,12 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import process from 'node:process';
 import { build } from 'vite';
+import {
+  createViteBuildProgressPlugin,
+  logDirSummary,
+  syncLog,
+} from './vite-build-progress.mjs';
 
 import {
   loadBackendEnv,
@@ -29,11 +36,29 @@ async function main() {
   );
   const assetBase = joinUrl(cdnBase, prefix);
 
-  console.log(`[deploy] building with asset base: ${assetBase}`);
+  syncLog(`[deploy] building with asset base: ${assetBase}`);
+  syncLog('[deploy] vite: reportCompressedSize=false; copyPublicDir=false（大体积 public 走 deploy-assets/CDN）');
+  await logDirSummary('deploy', path.join(projectRoot, 'public'));
+  const distDir = path.join(projectRoot, 'dist');
+  await logDirSummary('deploy', distDir);
+  const clearStarted = Date.now();
+  await fs.rm(distDir, { recursive: true, force: true });
+  syncLog(`[deploy] cleared dist/ in ${((Date.now() - clearStarted) / 1000).toFixed(1)}s`);
+  const buildStarted = Date.now();
   await build({
     root: projectRoot,
     base: assetBase,
+    logLevel: 'info',
+    plugins: [createViteBuildProgressPlugin('deploy')],
+    build: {
+      reportCompressedSize: false,
+      sourcemap: false,
+      copyPublicDir: false,
+      emptyOutDir: true,
+      watch: null,
+    },
   });
+  syncLog(`[deploy] vite build finished in ${((Date.now() - buildStarted) / 1000).toFixed(1)}s`);
 
   const uploadTargets = await collectCodeAssetTargets(prefix);
   if (uploadTargets.length === 0) {
