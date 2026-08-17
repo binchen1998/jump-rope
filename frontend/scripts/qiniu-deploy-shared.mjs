@@ -109,6 +109,8 @@ const __dirname = path.dirname(__filename);
 export const projectRoot = path.resolve(__dirname, '..');
 export const backendEnvPath = path.resolve(projectRoot, '..', 'backend', '.env');
 export const distDir = path.join(projectRoot, 'dist');
+/** deploy 构建暂存目录：不碰正在被后端托管的 dist/，避免一开打就「前端尚未构建」。 */
+export const stagingDistDir = path.join(projectRoot, 'dist-next');
 export const assetsDir = path.join(distDir, 'assets');
 export const razAudioPublicDir = path.join(projectRoot, 'public', 'raz-audio');
 
@@ -382,15 +384,58 @@ export async function uploadTargetsInParallel(uploadTargets, uploadOptions, opti
   );
 }
 
+
+export function isHtmlTarget(target) {
+  return typeof target?.remoteKey === 'string' && target.remoteKey.toLowerCase().endsWith('.html');
+}
+
+export function partitionHtmlTargets(uploadTargets) {
+  const assetTargets = [];
+  const htmlTargets = [];
+  for (const target of uploadTargets) {
+    if (isHtmlTarget(target)) htmlTargets.push(target);
+    else assetTargets.push(target);
+  }
+  return { assetTargets, htmlTargets };
+}
+
+/**
+ * 把暂存构建拷到正在被后端托管的 dist/：先非 HTML，最后才覆盖入口 HTML。
+ * 不先删 dist，旧页面在切 HTML 之前一直可访问。
+ */
+export async function publishStagingToLiveDist(fromDir, toDir) {
+  const files = await walkFiles(fromDir);
+  const htmlFiles = [];
+  const otherFiles = [];
+  for (const file of files) {
+    if (file.toLowerCase().endsWith('.html')) htmlFiles.push(file);
+    else otherFiles.push(file);
+  }
+  htmlFiles.sort((a, b) => {
+    const aIndex = path.basename(a) === 'index.html' ? 1 : 0;
+    const bIndex = path.basename(b) === 'index.html' ? 1 : 0;
+    return aIndex - bIndex;
+  });
+
+  for (const src of [...otherFiles, ...htmlFiles]) {
+    const dest = path.join(toDir, path.relative(fromDir, src));
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(src, dest);
+  }
+
+  return { otherFiles: otherFiles.length, htmlFiles: htmlFiles.length };
+}
+
 /** Vite-bundled JS/CSS under dist/assets/ → math/assets/... */
-export async function collectCodeAssetTargets(prefix) {
+export async function collectCodeAssetTargets(prefix, options = {}) {
+  const fromAssetsDir = options.assetsDir || assetsDir;
   const targets = [];
-  if (!(await pathExists(assetsDir))) {
+  if (!(await pathExists(fromAssetsDir))) {
     return targets;
   }
-  const assetFiles = await walkFiles(assetsDir);
+  const assetFiles = await walkFiles(fromAssetsDir);
   for (const localFile of assetFiles) {
-    const relativePath = path.relative(assetsDir, localFile).split(path.sep).join('/');
+    const relativePath = path.relative(fromAssetsDir, localFile).split(path.sep).join('/');
     targets.push({
       localFile,
       remoteKey: `${prefix}/assets/${relativePath}`,
